@@ -101,8 +101,8 @@ STEP_LIMIT=10
     _HOST_AUTOCMD[i]=groupmatchstr6
     _HOST_BASTION_NAME[i]=groupmatchstr7
     ;; - Note: パラメータ追加により
-    ;; 　区切り文字が9以上となる場合には
-    ;; 　再度strsplitを実行すること
+    ;;         区切り文字が9以上となる場合には
+    ;;         再度strsplitを実行すること
     ;; ex)
     ;;   dmy8=groupmatchstr8
     ;;   strsplit groupmatchstr9 ',' 9
@@ -200,6 +200,7 @@ goto _listLogin_exit
 :_easyLoginById
 
   ;; 接続先情報収集
+  _host=_HOST_NAME[_ID]
   _type=_HOST_TYPE[_ID]
   _addr=_HOST_ADDR[_ID]
   _user=_HOST_USER[_ID]
@@ -207,9 +208,9 @@ goto _listLogin_exit
 
   ;; 接続情報をステータスボックスで表示する
   setdlgpos 32 32
-  sprintf2 _st 'listLogin.ttl [%s]' _type
+  sprintf2 _st 'listLogin.ttl [%s]' _host
   sprintf2 _s1 'Step:[%3d/%3d]' (_idCount-i) _idCount
-  sprintf2 _s2 '> target: %s@%s' _user _addr
+  sprintf2 _s2 '> target: %s@%s [%s]' _user _addr _type
   sprintf2 _sb '%s'#13'%s' _s1 _s2
   statusbox _sb _st
 
