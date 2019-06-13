@@ -1,0 +1,347 @@
+;==============================================================================
+; Filename   : listLogin.ttl
+; Description: SSH auto login - host selection listbox from config.
+; Author     : sleepingyuta
+; Created    : 2006/12/23
+; Modified   : 2019/06/13
+;==============================================================================
+
+;---------------------------------------
+;; コンフィグ
+;---------------------------------------
+;; 接続先ホストの上限を設定する(1 - 65535)
+HOST_LIMIT=100
+
+;; 踏み台接続の上限を設定する(1 - 65535)
+STEP_LIMIT=10
+
+
+;---------------------------------------
+;; 初期処理
+;---------------------------------------
+
+  ;; 要求バージョンチェック
+  ;; - strdimの要求バージョン
+  _REQUIRE_VER='4.72'
+
+  getver _dmy_ _REQUIRE_VER
+  if result<0 then
+    _err='Check version error.'
+    sprintf2 _msg 'teraterm version %s or later is required.' _REQUIRE_VER
+    goto _listLogin_exit_with_msg
+  endif
+
+  ;; ホストリストファイル名を取得する
+  _HOSTFILE='hostlist.conf'
+
+  ;; コマンドリストフォルダを取得する
+  getdir _pwd
+  sprintf2 _CMDDIR '%s\%s' _pwd 'autocmd'
+
+  ;; ログ格納フォルダを作成する
+  getdir _pwd
+  sprintf2 _logDir '%s\%s' _pwd 'logs'
+  foldercreate _logDir
+
+
+;---------------------------------------
+;; ホストリスト作成
+;---------------------------------------
+
+  ;; 読み取り専用でホストリストを開く
+  fileopen _fh _HOSTFILE 0 0
+  _hostCount=0 ; hostlist count.
+
+  ;; ホストリストをメモリ上に保持
+  ;; - Note: fileread x 2よりコスト安？
+  strdim _HOST_LIST HOST_LIMIT
+  while
+    ;; 一行読み込む
+    filereadln _fh _buf
+
+    ;; ファイル終端時はループ終了
+    if result=1 break
+
+    ;; 空行と、コメント行はスキップ
+    strmatch _buf '^[^#]'
+    if result=0 continue
+
+    ;; 接続先ホストの上限に達した場合はエラー終了
+    if _hostCount>=HOST_LIMIT then
+      _err='Host count limit exceeded.'
+      sprintf2 _msg1 'Please, change the setting.'
+      sprintf2 _msg2 '> current: HOST_LIMIT: %s' HOST_LIMIT
+      sprintf2 _msg '%s'#13'%s' _msg1 _msg2
+      goto _listLogin_exit_with_msg
+    endif
+
+    ;; 読み込んだ行をホストリストに格納
+    _HOST_LIST[_hostCount]=_buf
+    _hostCount=_hostCount+1
+  endwhile
+
+  ;; ホストリスト分の配列を作成する
+  strdim _HOST_NAME _hostCount ; ホスト名(一覧表示、およびログ名に使用)
+  strdim _HOST_TYPE _hostCount ; 接続方法。ssh/telnetが入力可能
+  strdim _HOST_ADDR _hostCount ; IPアドレス
+  strdim _HOST_USER _hostCount ; ログインユーザ
+  strdim _HOST_PASS _hostCount ; ログインパス
+  strdim _HOST_AUTOCMD _hostCount ; 自動実行コマンドのプレフィクス
+  strdim _HOST_BASTION_NAME _hostCount ; 踏み台サーバのホスト名
+
+  ;; CSVデータを分割して格納する
+  for i 0 (_hostCount-1)
+    strsplit _HOST_LIST[i] ',' 9
+    ;; それぞれの配列に格納する
+    _HOST_NAME[i]=groupmatchstr1
+    _HOST_TYPE[i]=groupmatchstr2
+    _HOST_ADDR[i]=groupmatchstr3
+    _HOST_USER[i]=groupmatchstr4
+    _HOST_PASS[i]=groupmatchstr5
+    _HOST_AUTOCMD[i]=groupmatchstr6
+    _HOST_BASTION_NAME[i]=groupmatchstr7
+    ;; - Note: パラメータ追加により
+    ;; 　区切り文字が9以上となる場合には
+    ;; 　再度strsplitを実行すること
+    ;; ex)
+    ;;   dmy8=groupmatchstr8
+    ;;   strsplit groupmatchstr9 ',' 9
+    ;;   dmy9=groupmatchstr1
+    ;;   dmy10=groupmatchstr2
+  next
+
+
+;---------------------------------------
+;; 接続先を決定する
+;---------------------------------------
+
+  ;; 接続先ホストのインデックスを取得
+  listbox '接続先ホストを選択してください' '接続坂ホスト選択' _HOST_NAME
+  if result<0 goto _listLogin_exit
+  _ID=result
+
+  ;; 接続先リストを作成する
+  intdim _TARGET_IDS STEP_LIMIT
+  _idCount=0 ; target host id count.
+
+  ;; 接続先リストにインデックスを登録
+  _TARGET_IDS[_idCount]=_ID
+  _idCount=_idCount+1
+
+  ;; 踏み台サーバを検索する
+  while
+    ;; 接続先に踏み台未設定ならループ終了
+    _KEY=_HOST_BASTION_NAME[_ID]
+    strlen _KEY
+    if result<=0 break
+
+    ;; ホストリストから全件検索
+    _SEARCH_RESULT=-1 ; 検索結果初期化(NG)
+    for _ID 0 (_hostCount-1)
+      ;; ホスト名と比較
+      strcompare _HOST_NAME[_ID] _KEY
+      _SEARCH_RESULT=result
+
+      ;; 見つかった場合はループ終了
+      if _SEARCH_RESULT=0 break
+    next
+
+    ;; 全件不一致の場合はエラー終了
+    if _SEARCH_RESULT<>0 then
+      _err='Hostname search failure.'
+      sprintf2 _msg 'Hostname "%s" not found in "%s".' _KEY _HOSTFILE
+      goto _listLogin_exit_with_msg
+    endif
+
+    ;; 踏み台接続の上限に達した場合はエラー終了
+    if _idCount>=STEP_LIMIT then
+      _err='Step count limit exceeded.'
+      sprintf2 _msg1 'Please, change the setting.'
+      sprintf2 _msg2 '> current: STEP_LIMIT: %s' STEP_LIMIT
+      sprintf2 _msg '%s'#13'%s' _msg1 _msg2
+      goto _listLogin_exit_with_msg
+    endif
+
+    ;; 接続先リストにインデックスを登録
+    _TARGET_IDS[_idCount]=_ID
+    _idCount=_idCount+1
+  endwhile
+
+
+;---------------------------------------
+;; 接続処理
+;---------------------------------------
+
+  ;; 接続先リストの降順に接続する
+  for i (_idCount-1) 0
+    ;; リストの後から接続を試みる処理
+    _ID=_TARGET_IDS[i]
+    call _easyLoginById
+
+    ;; ログ取得を試みる
+    _TARGET_ID=_TARGET_IDS[0] ; 接続先
+    call _startLog
+
+    ;; 自動実行コマンド
+    _prefix=_HOST_AUTOCMD[_ID]
+    call _executeAutocmd
+  next
+
+
+;---------------------------------------
+;; 正常終了
+;---------------------------------------
+goto _listLogin_exit
+
+
+;---------------------------------------
+;; ログイン処理(簡易版)
+;---------------------------------------
+:_easyLoginById
+
+  ;; 接続先情報収集
+  _type=_HOST_TYPE[_ID]
+  _addr=_HOST_ADDR[_ID]
+  _user=_HOST_USER[_ID]
+  _pass=_HOST_PASS[_ID]
+
+  ;; 接続情報をステータスボックスで表示する
+  setdlgpos 32 32
+  sprintf2 _st 'listLogin.ttl [%s]' _type
+  sprintf2 _s1 'Step:[%3d/%3d]' (_idCount-i) _idCount
+  sprintf2 _s2 '> target: %s@%s' _user _addr
+  sprintf2 _sb '%s'#13'%s' _s1 _s2
+  statusbox _sb _st
+
+  ;; リンク状態確認
+  testlink
+  _state=result
+  if _state=2 then
+    ;; 接続済み
+    strcompare _type 'ssh'
+    if result=0 then
+      ;; ssh接続
+      sprintf2 msg 'ssh %s@%s' _user _addr
+      sendln msg
+      wait 'assword:' '(yes/no)'
+      if result=2 then
+        sendln yes
+        wait 'assword:' '(yes/no)'
+        if result=1 then
+          sendln _pass
+        endif
+      elseif result=1 then
+        sendln _pass
+      endif
+
+    else
+      ;; telnet接続
+      sprintf2 msg 'telnet -l %s %s' _user _addr
+      wait 'assword:'
+      if result=1 then
+        sendln _pass
+      endif
+    endif
+
+  endif
+
+  ;; 未接続の場合はconnectを使用する
+  strcompare _type 'ssh'
+  if result=0 then
+    ;; ssh接続
+    sprintf2 msg '%s:22 /ssh /auth=password /user=%s /passwd=%s' _addr _user _pass
+    connect msg
+    wait '$' '#'
+
+  else
+    ;; telnet接続
+    sprintf2 msg '%s:23 /nossh /T=1' _addr
+    connect msg
+
+    wait 'sername:'
+    if result=1 then
+      sendln _user
+    endif
+    wait 'assword:'
+    if result=1 then
+      sendln _pass
+    endif
+    wait '$' '#'
+
+  endif
+
+  ;; 呼び元に帰る
+  return
+
+
+;---------------------------------------
+;; ログ取得処理
+;---------------------------------------
+:_startLog
+
+  ;; 接続先情報収集
+  _addr=_HOST_ADDR[_TARGET_ID]
+  _name=_HOST_NAME[_TARGET_ID]
+
+  ;; ログ取得中なら何もしない
+  loginfo _dmy_
+  if result>=0 return
+
+  ;; ログファイル名作成
+  _timeFormat='%Y%m%d-%H%M%S'
+  getdate _now _timeFormat
+  sprintf2 _logName '%s\%s-%s_%s.log' _logDir _addr _name _now
+
+  ;; ログ取得開始
+  ;; - plaintext on
+  ;; - timestamp on
+  logopen _logName 0 0 1 1
+
+  ;; 呼び元に帰る
+  return
+
+;---------------------------------------
+;; 自動実行コマンド
+;---------------------------------------
+:_executeAutocmd
+
+  ;; コマンドリストのファイル名を取得
+  sprintf2 _cmdFile '%s\%s.conf' _cmdDir _prefix
+
+  ;; ファイルがない場合は終了する
+  filesearch _cmdFile
+  if result=0 return
+
+  ;; 読み取り専用でコマンドリストを開く
+  fileopen _fh _cmdFile 0 0
+  while
+    ;; 一行読み込む
+    filereadln _fh _buf
+
+    ;; ファイル終端時はループ終了
+    if result=1 break
+
+    ;; 読み込んだ行を実行する
+    flushrecv
+    sendln _buf
+    wait '$' '#'
+    mpause 100 ; 100ms停止
+  endwhile
+
+  ;; 呼び元に帰る
+  return
+
+
+;---------------------------------------
+;; マクロ異常終了(メッセージ出力)
+;---------------------------------------
+:_listLogin_exit_with_msg
+  messagebox _msg _err
+  goto _listLogin_exit
+
+
+;---------------------------------------
+;; マクロ正常終了
+;---------------------------------------
+:_listLogin_exit
+  ; exit
