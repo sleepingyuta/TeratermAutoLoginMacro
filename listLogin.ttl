@@ -88,6 +88,8 @@ STEP_LIMIT=10
   strdim _HOST_PASS _hostCount ; ログインパス
   strdim _HOST_AUTOCMD _hostCount ; 自動実行コマンドのプレフィクス
   strdim _HOST_BASTION_NAME _hostCount ; 踏み台サーバのホスト名
+  strdim _HOST_SSH_OPTIONS _hostCount ; SSHログイン時のオプション
+  strdim _HOST_CONNECT_ARGS _hostCount ; Teraterm接続オプション
 
   ;; CSVデータを分割して格納する
   for i 0 (_hostCount-1)
@@ -100,6 +102,9 @@ STEP_LIMIT=10
     _HOST_PASS[i]=groupmatchstr5
     _HOST_AUTOCMD[i]=groupmatchstr6
     _HOST_BASTION_NAME[i]=groupmatchstr7
+    _HOST_SSH_OPTIONS[i]=groupmatchstr8
+    strsplit groupmatchstr9 ',' 9
+    _HOST_CONNECT_ARGS[i]=groupmatchstr1
     ;; - Note: パラメータ追加により
     ;;         区切り文字が9以上となる場合には
     ;;         再度strsplitを実行すること
@@ -127,6 +132,9 @@ STEP_LIMIT=10
   ;; 接続先リストにインデックスを登録
   _TARGET_IDS[_idCount]=_ID
   _idCount=_idCount+1
+
+  ;; teratermオプションを追加する
+  _TTL_OPT=_HOST_CONNECT_ARGS[_ID]
 
   ;; 踏み台サーバを検索する
   while
@@ -165,6 +173,11 @@ STEP_LIMIT=10
     ;; 接続先リストにインデックスを登録
     _TARGET_IDS[_idCount]=_ID
     _idCount=_idCount+1
+
+    ;; teratermオプションを追加する
+    strconcat _TTL_OPT " "
+    strconcat _TTL_OPT _HOST_CONNECT_ARGS[_ID]
+
   endwhile
 
 
@@ -205,6 +218,8 @@ goto _listLogin_exit
   _addr=_HOST_ADDR[_ID]
   _user=_HOST_USER[_ID]
   _pass=_HOST_PASS[_ID]
+  _args=_HOST_SSH_OPTIONS[_ID]
+  ; _vals=_HOST_CONNECT_ARGS[_ID]
 
   ;; 接続情報をステータスボックスで表示する
   setdlgpos 32 32
@@ -222,11 +237,11 @@ goto _listLogin_exit
     strcompare _type 'ssh'
     if result=0 then
       ;; ssh接続
-      sprintf2 msg 'ssh %s@%s' _user _addr
+      sprintf2 msg 'ssh %s %s@%s' _args _user _addr
       sendln msg
       wait 'assword:' '(yes/no)'
       if result=2 then
-        sendln yes
+        sendln 'yes'
         wait 'assword:' '(yes/no)'
         if result=1 then
           sendln _pass
@@ -250,13 +265,13 @@ goto _listLogin_exit
   strcompare _type 'ssh'
   if result=0 then
     ;; ssh接続
-    sprintf2 msg '%s:22 /ssh /auth=password /user=%s /passwd=%s' _addr _user _pass
+    sprintf2 msg '%s:22 /ssh /auth=password /user=%s /passwd=%s %s' _addr _user _pass _TTL_OPT
     connect msg
     wait '$' '#'
 
   else
     ;; telnet接続
-    sprintf2 msg '%s:23 /nossh /T=1' _addr
+    sprintf2 msg '%s:23 /nossh /T=1 %s' _addr _TTL_OPT
     connect msg
 
     wait 'sername:'
@@ -267,7 +282,7 @@ goto _listLogin_exit
     if result=1 then
       sendln _pass
     endif
-    wait '$' '#'
+    wait '$' '#' '> '
 
   endif
 
